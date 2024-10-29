@@ -6,69 +6,65 @@ const openai = new OpenAI({
   baseURL: process.env.OPENAI_URL,
 })
 
-// 定义错误响应的类型
-interface OpenAIErrorResponse {
-  response?: {
-    data?: unknown;
-    status?: number;
-    statusText?: string;
-  };
-}
+// 设置超时时间为 8 秒
+const TIMEOUT = 8000
 
 export async function POST(request: Request) {
   try {
     const { message } = await request.json()
 
-    // 获取 AI 回复
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: message }],
-      temperature: 0.7,
-      max_tokens: 1000,
+    // 创建一个带超时的 Promise
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timeout')), TIMEOUT)
     })
 
-    const reply = completion.choices[0].message.content
+    // 创建 AI 回复的 Promise
+    const responsePromise = (async () => {
+      // 获取 AI 回复
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: message }],
+        temperature: 0.7,
+        max_tokens: 500, // 减少 token 数量以加快响应
+      })
 
-    if (!reply) {
-      throw new Error('No reply from AI')
-    }
+      const reply = completion.choices[0].message.content
 
-    // 添加延迟，避免过快请求
-    await new Promise(resolve => setTimeout(resolve, 1000))
+      if (!reply) {
+        throw new Error('No reply from AI')
+      }
 
-    // 生成语音
-    const mp3 = await openai.audio.speech.create({
-      model: "tts-1",
-      voice: "alloy",
-      input: reply,
-    })
+      // 生成语音
+      const mp3 = await openai.audio.speech.create({
+        model: "tts-1",
+        voice: "alloy",
+        input: reply.slice(0, 1000), // 限制语音长度
+      })
 
-    // 获取音频数据并转换为 Base64
-    const audioData = await mp3.arrayBuffer()
-    const base64Audio = Buffer.from(audioData).toString('base64')
+      // 获取音频数据并转换为 Base64
+      const audioData = await mp3.arrayBuffer()
+      const base64Audio = Buffer.from(audioData).toString('base64')
 
-    // 返回 Base64 编码的音频数据和文本
-    return NextResponse.json({
-      audio: base64Audio,
-      text: reply,
-    })
+      return { audio: base64Audio, text: reply }
+    })()
+
+    // 使用 Promise.race 来处理超时
+    const result = await Promise.race([responsePromise, timeoutPromise])
+    return NextResponse.json(result)
+
   } catch (error) {
     console.error('Chat error:', error)
     
-    // 添加更详细的错误信息
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    const errorDetails = error instanceof Error 
-      ? (error as OpenAIErrorResponse).response?.data 
-      : null
+    // 根据错误类型返回不同的状态码
+    const statusCode = error instanceof Error && error.message === 'Request timeout' ? 504 : 500
     
     return NextResponse.json(
       { 
         error: 'Chat failed', 
-        message: errorMessage,
-        details: errorDetails,
+        message: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString()
       },
-      { status: 500 }
+      { status: statusCode }
     )
   }
 } 

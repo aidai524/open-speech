@@ -85,26 +85,35 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
   }
 
   const processAIResponse = async (text: string) => {
-    const maxRetries = 3
+    const maxRetries = 2
     let retryCount = 0
 
     const tryRequest = async (): Promise<void> => {
       try {
         setIsProcessing(true)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 9000) // 9 秒超时
+
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ message: text }),
+          signal: controller.signal
         })
 
-        if (response.status === 503 && retryCount < maxRetries) {
-          retryCount++
-          console.log(`Retrying request (${retryCount}/${maxRetries})...`)
-          // 指数退避重试
-          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)))
-          return tryRequest()
+        clearTimeout(timeoutId)
+
+        if (response.status === 504 || response.status === 503) {
+          if (retryCount < maxRetries) {
+            retryCount++
+            console.log(`Retrying request (${retryCount}/${maxRetries})...`)
+            // 指数退避重试
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)))
+            return tryRequest()
+          }
+          throw new Error('Service unavailable after retries')
         }
 
         if (!response.ok) {
@@ -138,7 +147,6 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
         }
       } catch (error) {
         console.error('Error processing AI response:', error)
-        // 显示错误信息给用户
         onAIResponse(`抱歉，处理您的请求时出现错误：${error instanceof Error ? error.message : '未知错误'}`)
       } finally {
         setIsProcessing(false)
