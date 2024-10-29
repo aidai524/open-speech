@@ -1,12 +1,26 @@
-import { useState } from 'react'
+"use client"
+
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { AuthError } from '@supabase/supabase-js'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function AuthForm() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [isLogin, setIsLogin] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // 从 URL 参数中读取 mode
+    const mode = searchParams.get('mode')
+    if (mode === 'signup') {
+      setIsLogin(false)
+    }
+  }, [searchParams])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -20,15 +34,35 @@ export default function AuthForm() {
           password,
         })
         if (error) throw error
+        
+        router.push('/')
       } else {
         const { error } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            emailRedirectTo: `${window.location.origin}`,
+            data: {
+              confirm: false
+            }
+          }
         })
         if (error) throw error
+
+        const { error: loginError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+        if (loginError) throw loginError
+
+        router.push('/')
       }
-    } catch (error: any) {
-      setError(error.message)
+    } catch (error) {
+      if (error instanceof AuthError) {
+        setError(error.message)
+      } else {
+        setError('发生未知错误')
+      }
     } finally {
       setLoading(false)
     }
