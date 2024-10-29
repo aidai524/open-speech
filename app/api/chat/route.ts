@@ -6,17 +6,25 @@ const openai = new OpenAI({
   baseURL: process.env.OPENAI_URL,
 })
 
+// 定义错误响应的类型
+interface OpenAIErrorResponse {
+  response?: {
+    data?: unknown;
+    status?: number;
+    statusText?: string;
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const { message } = await request.json()
 
     // 获取 AI 回复
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [{ role: "user", content: message }],
       temperature: 0.7,
       max_tokens: 1000,
-      timeout: 10000,
     })
 
     const reply = completion.choices[0].message.content
@@ -49,7 +57,9 @@ export async function POST(request: Request) {
     
     // 添加更详细的错误信息
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    const errorDetails = error instanceof Error ? (error as any).response?.data : null
+    const errorDetails = error instanceof Error 
+      ? (error as OpenAIErrorResponse).response?.data 
+      : null
     
     return NextResponse.json(
       { 
