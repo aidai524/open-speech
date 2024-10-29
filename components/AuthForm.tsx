@@ -13,6 +13,7 @@ export default function AuthForm() {
   const [loading, setLoading] = useState(false)
   const [isLogin, setIsLogin] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
     // 从 URL 参数中读取 mode
@@ -20,7 +21,12 @@ export default function AuthForm() {
     if (mode === 'signup') {
       setIsLogin(false)
     }
+    setIsInitialized(true)
   }, [searchParams])
+
+  if (!isInitialized) {
+    return <div>Loading...</div>
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

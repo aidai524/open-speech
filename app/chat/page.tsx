@@ -65,8 +65,10 @@ export default function ChatPage() {
       if (page === 0) {
         setMessages(data || [])
       } else {
-        const uniqueMessages = new Set([...messages, ...data])
-        setMessages([...uniqueMessages])
+        const uniqueMessages = data.filter(newMsg => 
+          !messages.some(existingMsg => existingMsg.id === newMsg.id)
+        )
+        setMessages(prev => [...prev, ...uniqueMessages])
       }
     } catch (error) {
       console.error('Error loading chat history:', error)
