@@ -85,51 +85,67 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
   }
 
   const processAIResponse = async (text: string) => {
-    try {
-      setIsProcessing(true)
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: text }),
-      })
+    const maxRetries = 3
+    let retryCount = 0
 
-      if (!response.ok) {
-        throw new Error('AI response failed')
-      }
+    const tryRequest = async (): Promise<void> => {
+      try {
+        setIsProcessing(true)
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message: text }),
+        })
 
-      const data = await response.json()
-      
-      if (data.error) {
-        throw new Error(data.error)
-      }
-
-      // 处理文本回复
-      if (data.text) {
-        onAIResponse(data.text)
-      }
-
-      // 处理音频数据
-      if (data.audio) {
-        // 将 Base64 转换回 Blob
-        const audioBlob = new Blob(
-          [Buffer.from(data.audio, 'base64')],
-          { type: 'audio/mpeg' }
-        )
-        const audioUrl = URL.createObjectURL(audioBlob)
-
-        // 播放音频
-        if (audioRef.current) {
-          audioRef.current.src = audioUrl
-          await audioRef.current.play()
+        if (response.status === 503 && retryCount < maxRetries) {
+          retryCount++
+          console.log(`Retrying request (${retryCount}/${maxRetries})...`)
+          // 指数退避重试
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)))
+          return tryRequest()
         }
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(`API error: ${errorData.message || 'Unknown error'}`)
+        }
+
+        const data = await response.json()
+        
+        if (data.error) {
+          throw new Error(data.error)
+        }
+
+        // 处理文本回复
+        if (data.text) {
+          onAIResponse(data.text)
+        }
+
+        // 处理音频数据
+        if (data.audio) {
+          const audioBlob = new Blob(
+            [Buffer.from(data.audio, 'base64')],
+            { type: 'audio/mpeg' }
+          )
+          const audioUrl = URL.createObjectURL(audioBlob)
+
+          if (audioRef.current) {
+            audioRef.current.src = audioUrl
+            await audioRef.current.play()
+          }
+        }
+      } catch (error) {
+        console.error('Error processing AI response:', error)
+        // 显示错误信息给用户
+        onAIResponse(`抱歉，处理您的请求时出现错误：${error instanceof Error ? error.message : '未知错误'}`)
+      } finally {
+        setIsProcessing(false)
       }
-    } catch (error) {
-      console.error('Error processing AI response:', error)
-    } finally {
-      setIsProcessing(false)
     }
+
+    await tryRequest()
   }
 
   return (

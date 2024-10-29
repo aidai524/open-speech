@@ -12,8 +12,11 @@ export async function POST(request: Request) {
 
     // 获取 AI 回复
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-3.5-turbo",
       messages: [{ role: "user", content: message }],
+      temperature: 0.7,
+      max_tokens: 1000,
+      timeout: 10000,
     })
 
     const reply = completion.choices[0].message.content
@@ -21,6 +24,9 @@ export async function POST(request: Request) {
     if (!reply) {
       throw new Error('No reply from AI')
     }
+
+    // 添加延迟，避免过快请求
+    await new Promise(resolve => setTimeout(resolve, 1000))
 
     // 生成语音
     const mp3 = await openai.audio.speech.create({
@@ -40,8 +46,18 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error('Chat error:', error)
+    
+    // 添加更详细的错误信息
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorDetails = error instanceof Error ? (error as any).response?.data : null
+    
     return NextResponse.json(
-      { error: 'Chat failed', details: error instanceof Error ? error.message : 'Unknown error' },
+      { 
+        error: 'Chat failed', 
+        message: errorMessage,
+        details: errorDetails,
+        timestamp: new Date().toISOString()
+      },
       { status: 500 }
     )
   }
