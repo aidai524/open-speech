@@ -69,116 +69,99 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
       })
 
       if (!response.ok) {
-        throw new Error('Transcription failed')
+        const errorData = await response.json()
+        throw new Error(`语音识别失败: ${errorData.message} (${errorData.error})`)
       }
 
       const data: TranscriptionResult = await response.json()
-      
-      // 根据检测到的语言设置适当的字体和文字方向
-      const text = data.text
-      onTranscription(text)
-      return text
+      onTranscription(data.text)
+      return data.text
     } catch (error) {
-      console.error('Error sending audio to server:', error)
+      console.error('语音识别错误:', error)
+      onTranscription(`语音识别出错: ${error instanceof Error ? error.message : '未知错误'}`)
       return null
     }
   }
 
   const processAIResponse = async (text: string) => {
-    const maxRetries = 2
-    let retryCount = 0
+    let controller: AbortController | null = null
+    let timeoutId: NodeJS.Timeout | null = null
 
-    const tryRequest = async (): Promise<void> => {
-      let controller: AbortController | null = null
-      let timeoutId: NodeJS.Timeout | null = null
-
-      try {
-        setIsProcessing(true)
-        controller = new AbortController()
-        
-        // 设置更长的超时时间（30秒）
-        timeoutId = setTimeout(() => {
-          if (controller) {
-            controller.abort('Request timeout')
-          }
-        }, 30000)
-
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ message: text }),
-          signal: controller.signal
-        })
-
-        // 清除超时计时器
-        if (timeoutId) {
-          clearTimeout(timeoutId)
-        }
-
-        if (response.status === 504 || response.status === 503) {
-          if (retryCount < maxRetries) {
-            retryCount++
-            console.log(`Retrying request (${retryCount}/${maxRetries})...`)
-            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)))
-            return tryRequest()
-          }
-          throw new Error('Service unavailable after retries')
-        }
-
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(`API error: ${errorData.message || 'Unknown error'}`)
-        }
-
-        const data = await response.json()
-        
-        if (data.error) {
-          throw new Error(data.error)
-        }
-
-        // 处理文本回复
-        if (data.text) {
-          onAIResponse(data.text)
-        }
-
-        // 处理音频数据（如果有）
-        if (data.audio) {
-          try {
-            const audioBlob = new Blob(
-              [Buffer.from(data.audio, 'base64')],
-              { type: 'audio/mpeg' }
-            )
-            const audioUrl = URL.createObjectURL(audioBlob)
-
-            if (audioRef.current) {
-              audioRef.current.src = audioUrl
-              await audioRef.current.play()
-            }
-          } catch (audioError) {
-            console.error('Error playing audio:', audioError)
-          }
-        }
-      } catch (error) {
-        console.error('Error processing AI response:', error)
-        // 只有在不是手动中止的情况下才显示错误消息
-        if (error instanceof Error && error.name !== 'AbortError') {
-          onAIResponse(`抱歉，处理您的请求时出现错误：${error.message}`)
-        }
-      } finally {
-        // 清理工作
-        if (timeoutId) {
-          clearTimeout(timeoutId)
-        }
+    try {
+      setIsProcessing(true)
+      controller = new AbortController()
+      
+      timeoutId = setTimeout(() => {
         if (controller) {
-          controller.abort()
+          controller.abort('请求超时')
         }
-        setIsProcessing(false)
-      }
-    }
+      }, 110000)
 
-    await tryRequest()
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: text }),
+        signal: controller.signal
+      })
+
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(`AI 响应失败: ${errorData.message} (${errorData.error})`)
+      }
+
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(`AI 错误: ${data.message} (${data.error})`)
+      }
+
+      // 处理文本回复
+      if (data.text) {
+        onAIResponse(data.text)
+      }
+
+      // 处理音频数据（如果有）
+      if (data.audio) {
+        try {
+          const audioBlob = new Blob(
+            [Buffer.from(data.audio, 'base64')],
+            { type: 'audio/mpeg' }
+          )
+          const audioUrl = URL.createObjectURL(audioBlob)
+
+          if (audioRef.current) {
+            audioRef.current.src = audioUrl
+            await audioRef.current.play()
+          }
+        } catch (audioError) {
+          console.error('音频播放错误:', audioError)
+          onAIResponse('AI 回复已生成，但语音播放失败')
+        }
+      } else if (data.speechError) {
+        onAIResponse('AI 已回复，但语音生成失败')
+      }
+    } catch (error) {
+      console.error('AI 处理错误:', error)
+      if (error instanceof Error && error.name === 'AbortError') {
+        onAIResponse('请求超时，请稍后重试')
+      } else {
+        onAIResponse(`处理失败: ${error instanceof Error ? error.message : '未知错误'}`)
+      }
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      if (controller) {
+        controller.abort()
+      }
+      setIsProcessing(false)
+    }
   }
 
   return (

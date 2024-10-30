@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 
-// 创建两个不同的 OpenAI 实例，分别用于聊天和语音服务
 const chatAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   baseURL: process.env.OPENAI_URL,
-  timeout: 120000, // 设置 120 秒超时
-  maxRetries: 3,  // 最大重试次数
+  timeout: 120000,
+  maxRetries: 3,
 })
 
 const speechAI = new OpenAI({
@@ -18,71 +17,75 @@ const speechAI = new OpenAI({
 
 const TIMEOUT = 110000
 
-export const runtime = 'edge' // 使用 Edge Runtime
+export const runtime = 'edge'
 
 export async function POST(request: Request) {
   try {
+    console.log('[Chat API] Received request')
     const { message } = await request.json()
     
-    // 创建一个带超时的 Promise
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Request timeout')), TIMEOUT)
+      setTimeout(() => reject(new Error('CHAT_TIMEOUT')), TIMEOUT)
     })
 
-    // 创建 AI 回复的 Promise
     const responsePromise = (async () => {
       // 获取 AI 回复
+      console.log('[Chat API] Requesting chat completion')
       const completion = await chatAI.chat.completions.create({
-        model: "gpt-4o",  // 使用正确的模型名称
+        model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: message }],
-        max_tokens: 5000,  // 限制响应长度
+        max_tokens: 5000,
         temperature: 0.7,
       })
 
       const reply = completion.choices[0].message.content
 
       if (!reply) {
-        throw new Error('No reply from AI')
+        throw new Error('CHAT_NO_REPLY')
       }
 
       try {
         // 生成语音
+        console.log('[Chat API] Generating speech')
         const mp3 = await speechAI.audio.speech.create({
           model: "tts-1",
           voice: "alloy",
-          input: reply.slice(0, 500), // 进一步限制语音长度
+          input: reply.slice(0, 500),
         })
 
-        // 获取音频数据并转换为 Base64
         const audioData = await mp3.arrayBuffer()
         const base64Audio = Buffer.from(audioData).toString('base64')
 
+        console.log('[Chat API] Response ready')
         return { audio: base64Audio, text: reply }
       } catch (speechError) {
-        console.error('Speech synthesis error:', speechError)
-        // 如果语音合成失败，至少返回文本
-        return { text: reply }
+        console.error('[Chat API] Speech synthesis error:', speechError)
+        return { text: reply, speechError: 'SPEECH_GENERATION_FAILED' }
       }
     })()
 
-    // 使用 Promise.race 来处理超时
     const result = await Promise.race([responsePromise, timeoutPromise])
     return NextResponse.json(result)
 
   } catch (error) {
-    console.error('Chat error:', error)
+    console.error('[Chat API] Error:', error)
     
-    // 根据错误类型返回不同的状态码和消息
+    let errorCode = 'CHAT_UNKNOWN_ERROR'
     let statusCode = 500
     let message = 'Unknown error'
 
     if (error instanceof Error) {
-      if (error.message === 'Request timeout') {
+      if (error.message === 'CHAT_TIMEOUT') {
+        errorCode = 'CHAT_TIMEOUT'
         statusCode = 504
-        message = 'Request timed out'
+        message = 'Chat request timed out'
+      } else if (error.message === 'CHAT_NO_REPLY') {
+        errorCode = 'CHAT_NO_REPLY'
+        message = 'No reply from AI'
       } else if (error.message.includes('fetch failed')) {
+        errorCode = 'CHAT_SERVICE_UNAVAILABLE'
         statusCode = 503
-        message = 'Service temporarily unavailable'
+        message = 'Chat service temporarily unavailable'
       } else {
         message = error.message
       }
@@ -90,9 +93,10 @@ export async function POST(request: Request) {
     
     return NextResponse.json(
       { 
-        error: 'Chat failed', 
+        error: errorCode,
         message,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        details: error instanceof Error ? error.stack : undefined
       },
       { status: statusCode }
     )
