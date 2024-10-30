@@ -22,7 +22,7 @@ export const runtime = 'edge'
 export async function POST(request: Request) {
   try {
     console.log('[Chat API] Received request')
-    const { message } = await request.json()
+    const { message, enableVoice } = await request.json()
     
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('CHAT_TIMEOUT')), TIMEOUT)
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       // 获取 AI 回复
       console.log('[Chat API] Requesting chat completion')
       const completion = await chatAI.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4o",
         messages: [{ role: "user", content: message }],
         max_tokens: 5000,
         temperature: 0.7,
@@ -44,24 +44,30 @@ export async function POST(request: Request) {
         throw new Error('CHAT_NO_REPLY')
       }
 
-      try {
-        // 生成语音
-        console.log('[Chat API] Generating speech')
-        const mp3 = await speechAI.audio.speech.create({
-          model: "tts-1",
-          voice: "alloy",
-          input: reply.slice(0, 500),
-        })
+      // 只在启用语音时生成语音
+      if (enableVoice) {
+        try {
+          console.log('[Chat API] Generating speech')
+          const mp3 = await speechAI.audio.speech.create({
+            model: "tts-1",
+            voice: "alloy",
+            input: reply.slice(0, 500),
+          })
 
-        const audioData = await mp3.arrayBuffer()
-        const base64Audio = Buffer.from(audioData).toString('base64')
+          const audioData = await mp3.arrayBuffer()
+          const base64Audio = Buffer.from(audioData).toString('base64')
 
-        console.log('[Chat API] Response ready')
-        return { audio: base64Audio, text: reply }
-      } catch (speechError) {
-        console.error('[Chat API] Speech synthesis error:', speechError)
-        return { text: reply, speechError: 'SPEECH_GENERATION_FAILED' }
+          console.log('[Chat API] Response ready with audio')
+          return { audio: base64Audio, text: reply }
+        } catch (speechError) {
+          console.error('[Chat API] Speech synthesis error:', speechError)
+          return { text: reply, speechError: 'SPEECH_GENERATION_FAILED' }
+        }
       }
+
+      // 语音未启用时只返回文本
+      console.log('[Chat API] Response ready (text only)')
+      return { text: reply }
     })()
 
     const result = await Promise.race([responsePromise, timeoutPromise])
