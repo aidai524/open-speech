@@ -92,7 +92,7 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
       try {
         setIsProcessing(true)
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 9000) // 9 秒超时
+        const timeoutId = setTimeout(() => controller.abort(), 9000)
 
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -109,7 +109,6 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
           if (retryCount < maxRetries) {
             retryCount++
             console.log(`Retrying request (${retryCount}/${maxRetries})...`)
-            // 指数退避重试
             await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)))
             return tryRequest()
           }
@@ -132,17 +131,22 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
           onAIResponse(data.text)
         }
 
-        // 处理音频数据
+        // 处理音频数据（如果有）
         if (data.audio) {
-          const audioBlob = new Blob(
-            [Buffer.from(data.audio, 'base64')],
-            { type: 'audio/mpeg' }
-          )
-          const audioUrl = URL.createObjectURL(audioBlob)
+          try {
+            const audioBlob = new Blob(
+              [Buffer.from(data.audio, 'base64')],
+              { type: 'audio/mpeg' }
+            )
+            const audioUrl = URL.createObjectURL(audioBlob)
 
-          if (audioRef.current) {
-            audioRef.current.src = audioUrl
-            await audioRef.current.play()
+            if (audioRef.current) {
+              audioRef.current.src = audioUrl
+              await audioRef.current.play()
+            }
+          } catch (audioError) {
+            console.error('Error playing audio:', audioError)
+            // 音频播放失败时不影响文本显示
           }
         }
       } catch (error) {
