@@ -89,10 +89,19 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
     let retryCount = 0
 
     const tryRequest = async (): Promise<void> => {
+      let controller: AbortController | null = null
+      let timeoutId: NodeJS.Timeout | null = null
+
       try {
         setIsProcessing(true)
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 9000)
+        controller = new AbortController()
+        
+        // 设置更长的超时时间（30秒）
+        timeoutId = setTimeout(() => {
+          if (controller) {
+            controller.abort('Request timeout')
+          }
+        }, 30000)
 
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -103,7 +112,10 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
           signal: controller.signal
         })
 
-        clearTimeout(timeoutId)
+        // 清除超时计时器
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+        }
 
         if (response.status === 504 || response.status === 503) {
           if (retryCount < maxRetries) {
@@ -146,13 +158,22 @@ export default function MicrophoneInput({ onTranscription, onAIResponse }: Micro
             }
           } catch (audioError) {
             console.error('Error playing audio:', audioError)
-            // 音频播放失败时不影响文本显示
           }
         }
       } catch (error) {
         console.error('Error processing AI response:', error)
-        onAIResponse(`抱歉，处理您的请求时出现错误：${error instanceof Error ? error.message : '未知错误'}`)
+        // 只有在不是手动中止的情况下才显示错误消息
+        if (error instanceof Error && error.name !== 'AbortError') {
+          onAIResponse(`抱歉，处理您的请求时出现错误：${error.message}`)
+        }
       } finally {
+        // 清理工作
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+        }
+        if (controller) {
+          controller.abort()
+        }
         setIsProcessing(false)
       }
     }
