@@ -5,15 +5,20 @@ import OpenAI from 'openai'
 const chatAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   baseURL: process.env.OPENAI_URL,
+  timeout: 60000, // 设置 60 秒超时
+  maxRetries: 3,  // 最大重试次数
 })
 
 const speechAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   baseURL: process.env.OPENAI_URL,
+  timeout: 60000,
+  maxRetries: 3,
 })
 
-// 设置超时时间为 60 秒
-const TIMEOUT = 60000
+const TIMEOUT = 55000
+
+export const runtime = 'edge' // 使用 Edge Runtime
 
 export async function POST(request: Request) {
   try {
@@ -28,8 +33,10 @@ export async function POST(request: Request) {
     const responsePromise = (async () => {
       // 获取 AI 回复
       const completion = await chatAI.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o",  // 使用正确的模型名称
         messages: [{ role: "user", content: message }],
+        max_tokens: 5000,  // 限制响应长度
+        temperature: 0.7,
       })
 
       const reply = completion.choices[0].message.content
@@ -43,7 +50,7 @@ export async function POST(request: Request) {
         const mp3 = await speechAI.audio.speech.create({
           model: "tts-1",
           voice: "alloy",
-          input: reply.slice(0, 1000), // 限制语音长度
+          input: reply.slice(0, 500), // 进一步限制语音长度
         })
 
         // 获取音频数据并转换为 Base64
@@ -65,13 +72,26 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Chat error:', error)
     
-    // 根据错误类型返回不同的状态码
-    const statusCode = error instanceof Error && error.message === 'Request timeout' ? 504 : 500
+    // 根据错误类型返回不同的状态码和消息
+    let statusCode = 500
+    let message = 'Unknown error'
+
+    if (error instanceof Error) {
+      if (error.message === 'Request timeout') {
+        statusCode = 504
+        message = 'Request timed out'
+      } else if (error.message.includes('fetch failed')) {
+        statusCode = 503
+        message = 'Service temporarily unavailable'
+      } else {
+        message = error.message
+      }
+    }
     
     return NextResponse.json(
       { 
         error: 'Chat failed', 
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message,
         timestamp: new Date().toISOString()
       },
       { status: statusCode }
