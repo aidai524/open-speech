@@ -7,6 +7,8 @@ import { createReadStream } from 'fs'
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   baseURL: process.env.OPENAI_URL,
+  timeout: 120000, // 设置 120 秒超时
+  maxRetries: 3,  // 最大重试次数
 })
 
 export async function POST(request: Request) {

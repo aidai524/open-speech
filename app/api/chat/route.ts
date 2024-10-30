@@ -5,18 +5,18 @@ import OpenAI from 'openai'
 const chatAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   baseURL: process.env.OPENAI_URL,
-  timeout: 60000, // 设置 60 秒超时
+  timeout: 120000, // 设置 120 秒超时
   maxRetries: 3,  // 最大重试次数
 })
 
 const speechAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   baseURL: process.env.OPENAI_URL,
-  timeout: 60000,
+  timeout: 120000,
   maxRetries: 3,
 })
 
-const TIMEOUT = 55000
+const TIMEOUT = 110000
 
 export const runtime = 'edge' // 使用 Edge Runtime
 
